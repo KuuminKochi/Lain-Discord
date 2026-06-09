@@ -227,7 +227,7 @@ export default definePlugin({
     description: "A cute Lain desktop pet for vendicated Vencord",
     authors: [{
         name: "realmxrza",
-        id: "693703872937590826"
+        id: "1348602887986745385"
     }],
 
     commands: [{
