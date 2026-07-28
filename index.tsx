@@ -23,19 +23,20 @@ type LainState = {
   sugarRush: boolean;
 };
 
+type LainContainer = {
+  container: HTMLDivElement;
+  lainSprite: HTMLImageElement;
+  bubble: HTMLDivElement;
+  expression: HTMLImageElement;
+};
+
 class Navi {
   private item: HTMLImageElement | null = null;
   private landed = false;
 }
 
 class LainPet {
-  private elements: {
-    container: HTMLDivElement;
-    lain: HTMLImageElement;
-    bubble: HTMLDivElement;
-    expression: HTMLImageElement;
-  };
-  private lain: HMTLImageElement | null = null;
+  private lainContainer: LainContainer | null = null;
   private state: LainState = {
     x: 100,
     y: 100,
@@ -47,7 +48,67 @@ class LainPet {
   };
 
   start() {
-    if (this.container) return;
+    if (this.lainContainer) return;
+
+    const container = document.createElement("div");
+    const lainSprite = document.createElement("img");
+    const bubble = document.createElement("div");
+    const expression = document.createElement("img");
+
+    this.lainConstainer = {
+      container,
+      lainSprite,
+      bubble,
+      expression,
+    };
+
+    container.style.cssText = `
+	position:fixed;
+	z-index:9999;
+	pointer-events:none;
+	top:0;
+	left:0;
+	width:100vw;
+	height:100vh;
+	`;
+
+    lainSprite.style.cssText = `
+	position:absolute;
+	width:100px;
+	pointer-events:auto;
+	cursor:grab;
+	transition: filter 0.2s;
+	object-fit: contain;
+	`;
+
+    bubble.style.cssText = `
+	position:absolute;
+	background:white;
+	color:black; border:2px solid black;
+	padding:8px;
+	border-radius:10px;
+	font-family:monospace;
+	font-size:12px; opacity:0;
+	transition: opacity 0.5s;
+	width:150px;
+	text-align:center;
+	z-index:10000;
+	pointer-events:none;
+	`;
+
+    expression.style.cssText = `
+	position:absolute;
+	width:50px;
+	opacity:0;
+	transition: opacity 0.3s;
+	z-index:10001;
+	pointer-events:none;
+	`;
+
+    document.body.appendChild(container);
+    container.appendChild(lainSprite);
+    container.appendChild(bubble);
+    container.appendChild(expression);
   }
 
   move(targetX: number, targetY: number) {}
@@ -63,27 +124,6 @@ class LainPet {
 
 function startLain() {
   if (container) return;
-
-  container = document.createElement("div");
-  container.style.cssText =
-    "position:fixed; z-index:9999; pointer-events:none; top:0; left:0; width:100vw; height:100vh;";
-
-  const lain = document.createElement("img");
-  lain.style.cssText =
-    "position:absolute; width:100px; pointer-events:auto; cursor:grab; transition: filter 0.2s; object-fit: contain;";
-
-  const bubble = document.createElement("div");
-  bubble.style.cssText =
-    "position:absolute; background:white; color:black; border:2px solid black; padding:8px; border-radius:10px; font-family:monospace; font-size:12px; opacity:0; transition: opacity 0.5s; width:150px; text-align:center; z-index:10000; pointer-events:none;";
-
-  const expression = document.createElement("img");
-  expression.style.cssText =
-    "position:absolute; width:50px; opacity:0; transition: opacity 0.3s; z-index:10001; pointer-events:none;";
-
-  document.body.appendChild(container);
-  container.appendChild(lain);
-  container.appendChild(bubble);
-  container.appendChild(expression);
 
   function updatePhysics() {
     if (state.isDragging) return;
