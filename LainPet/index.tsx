@@ -1,209 +1,13 @@
 import definePlugin from "@utils/types";
 import { ApplicationCommandOptionType } from "@api/Commands";
-
-let container: HTMLDivElement | null = null;
-let intervals: NodeJS.Timeout[] = [];
-let lainGlobal: any = null;
-
-const assetSrc = await fetch(
-  "https://raw.githubusercontent.com/KuuminKochi/Lain-Discord/main/lain-assets.json",
-);
-
-const dialogues = await fetch(
-  "https://raw.githubusercontent.com/KuuminKochi/Lain-Discord/main/lain-dialogues.json",
-);
-
-type LainState = {
-  x: number;
-  y: number;
-  outfit: "default" | "school" | "pink" | "bear" | "home";
-  mode: "idle" | "walk";
-  isDragging: boolean;
-  eventActive: boolean;
-  sugarRush: boolean;
-};
-
-type LainContainer = {
-  container: HTMLDivElement;
-  lainSprite: HTMLImageElement;
-  bubble: HTMLDivElement;
-  expression: HTMLImageElement;
-};
+import { LainPet } from "./classes/LainPet";
 
 class Navi {
   private item: HTMLImageElement | null = null;
   private landed = false;
 }
 
-class LainPet {
-  private lainContainer: LainContainer | null = null;
-  private state: LainState = {
-    x: 100,
-    y: 100,
-    outfit: "default",
-    mode: "idle",
-    isDragging: false,
-    eventActive: false,
-    sugarRush: false,
-  };
-
-  start() {
-    if (this.lainContainer) return;
-
-    const container = document.createElement("div");
-    const lainSprite = document.createElement("img");
-    const bubble = document.createElement("div");
-    const expression = document.createElement("img");
-
-    this.lainConstainer = {
-      container,
-      lainSprite,
-      bubble,
-      expression,
-    };
-
-    container.style.cssText = `
-	position:fixed;
-	z-index:9999;
-	pointer-events:none;
-	top:0;
-	left:0;
-	width:100vw;
-	height:100vh;
-	`;
-
-    lainSprite.style.cssText = `
-	position:absolute;
-	width:100px;
-	pointer-events:auto;
-	cursor:grab;
-	transition: filter 0.2s;
-	object-fit: contain;
-	`;
-
-    bubble.style.cssText = `
-	position:absolute;
-	background:white;
-	color:black; border:2px solid black;
-	padding:8px;
-	border-radius:10px;
-	font-family:monospace;
-	font-size:12px; opacity:0;
-	transition: opacity 0.5s;
-	width:150px;
-	text-align:center;
-	z-index:10000;
-	pointer-events:none;
-	`;
-
-    expression.style.cssText = `
-	position:absolute;
-	width:50px;
-	opacity:0;
-	transition: opacity 0.3s;
-	z-index:10001;
-	pointer-events:none;
-	`;
-
-    document.body.appendChild(container);
-    container.appendChild(lainSprite);
-    container.appendChild(bubble);
-    container.appendChild(expression);
-  }
-
-  move(targetX: number, targetY: number) {}
-
-  setOutfit(outfit: LainState["outfit"]) {
-    this.state.outfit = outfit;
-  }
-
-  startWalking() {
-    this.state.mode = "walk";
-  }
-}
-
 function startLain() {
-  if (container) return;
-
-  function updatePhysics() {
-    if (state.isDragging) return;
-    const normalSize = 100;
-    const eventSize = 200;
-    const currentSize = state.eventActive ? eventSize : normalSize;
-    const rightEdge = window.innerWidth - currentSize;
-    const bottomEdge = window.innerHeight - currentSize;
-
-    if (naviItem && naviLanded) {
-      state.targetX = parseFloat(naviItem.style.left);
-      state.targetY = parseFloat(naviItem.style.top);
-      state.mode = "walk";
-      const dx = state.x + normalSize / 2 - (state.targetX + 60);
-      const dy = state.y + normalSize / 2 - (state.targetY + 60);
-      if (Math.sqrt(dx * dx + dy * dy) < 30) {
-        naviItem.remove();
-        naviItem = null;
-        naviLanded = false;
-        triggerSugarRush();
-        showDialogue("NAVI COLLECTED.");
-      }
-    }
-
-    if (state.eventActive) {
-      state.x += (window.innerWidth / 2 - eventSize / 2 - state.x) * 0.1;
-      state.y += (window.innerHeight / 2 - eventSize / 2 - state.y) * 0.1;
-    } else if (state.sugarRush) {
-      state.x += state.vx * 4;
-      state.y += state.vy * 4;
-      if (state.x <= 0 || state.x >= rightEdge) state.vx *= -1;
-      if (state.y <= 0 || state.y >= bottomEdge) state.vy *= -1;
-      state.x = Math.max(0, Math.min(state.x, rightEdge));
-      state.y = Math.max(0, Math.min(state.y, bottomEdge));
-    } else if (state.mode === "walk") {
-      const dx = state.targetX - state.x;
-      const dy = state.targetY - state.y;
-      const dist = Math.sqrt(dx * dx + dy * dy);
-      if (dist > 5) {
-        state.vx = (dx / dist) * 4;
-        state.vy = (dy / dist) * 4;
-        state.x += state.vx;
-        state.y += state.vy;
-      } else {
-        state.mode = "idle";
-      }
-    } else {
-      if (Math.random() < 0.01) {
-        state.targetX = Math.random() * (window.innerWidth - normalSize);
-        state.targetY = Math.random() * (window.innerHeight - normalSize);
-        state.mode = "walk";
-      }
-    }
-    draw();
-  }
-
-  function draw() {
-    const size = state.eventActive ? 200 : 100;
-    lain.style.width = `${size}px`;
-    lain.style.left = `${state.x}px`;
-    lain.style.top = `${state.y}px`;
-    bubble.style.left = `${state.x + size / 2 - 75}px`;
-    bubble.style.top = `${state.y - 50}px`;
-    expression.style.left = `${state.x + size / 2 - 25}px`;
-    expression.style.top = `${state.y - 40}px`;
-
-    if (!state.eventActive) {
-      let newSrc =
-        state.mode === "walk"
-          ? state.vx >= 0
-            ? assets[state.outfit as keyof typeof assets].right
-            : assets[state.outfit as keyof typeof assets].left
-          : assets[state.outfit as keyof typeof assets].idle;
-      if (lain.src !== newSrc) lain.src = newSrc;
-    }
-    lain.style.filter = state.sugarRush
-      ? `hue-rotate(${Date.now() % 360}deg) brightness(1.2)`
-      : "";
-  }
-
   function triggerExpression() {
     if (state.eventActive) return;
     expression.src =
@@ -303,19 +107,6 @@ function startLain() {
     }, 15000),
   );
 
-  lain.onmousedown = (e) => {
-    state.isDragging = true;
-    window.onmousemove = (ev) => {
-      state.x = ev.clientX - 50;
-      state.y = ev.clientY - 50;
-      draw();
-    };
-    window.onmouseup = () => {
-      state.isDragging = false;
-      window.onmousemove = null;
-    };
-  };
-
   intervals.push(
     setInterval(() => {
       const outfits = ["default", "school", "pink", "bear", "home"];
@@ -354,6 +145,8 @@ function stopLain() {
   }
   lainGlobal = null;
 }
+
+const lainPet = new LainPet();
 
 export default definePlugin({
   name: "LainPet",
@@ -448,7 +241,7 @@ export default definePlugin({
   ],
 
   start() {
-    startLain();
+    lainPet.start();
     console.log(
       "%c Lain Pet Plugin Started ",
       "background: #000; color: #f0f; font-weight: bold; font-size: 14px;",
@@ -456,7 +249,7 @@ export default definePlugin({
   },
 
   stop() {
-    stopLain();
+    lainPet.stop();
     console.log(
       "%c Lain Pet Plugin Stopped ",
       "background: #000; color: #f0f; font-weight: bold; font-size: 14px;",
