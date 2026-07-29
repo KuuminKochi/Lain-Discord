@@ -25,6 +25,10 @@ const SPRITE_SIZE = {
 
 export class LainPet {
   private lainElements: LainElements | null = null;
+  private physicsInterval: ReturnType<typeof setInterval> | null = null;
+  private randomEventInterval: ReturnType<typeof setInterval> | null = null;
+  private timeouts = new Set<number>();
+
   private state: LainState = {
     position: { x: 100, y: 100 },
     velocity: { x: 0, y: 0 },
@@ -38,14 +42,14 @@ export class LainPet {
   };
 
   public start() {
-    if (this.lainElements) return;
-
     const lainState = this.state;
 
     const container = document.createElement("div");
     const lainSprite = document.createElement("img");
     const bubble = document.createElement("div");
     const expression = document.createElement("img");
+
+    if (this.lainElements) return;
 
     this.lainElements = {
       container,
@@ -114,10 +118,78 @@ export class LainPet {
     container.appendChild(lainSprite);
     container.appendChild(bubble);
     container.appendChild(expression);
+
+    this.physicsInterval = setInterval(() => {
+      this.updatePhysics();
+    }, 30);
   }
 
-  public setOutfit(outfit: LainState["outfit"]) {
+  public stop() {
+    const lainState = this.state;
+    const lainElements = this.lainElements;
+    if (this.physicsInterval !== null) {
+      clearInterval(this.physicsInterval);
+      this.physicsInterval = null;
+    }
+    if (this.randomEventInterval !== null) {
+      clearInterval(this.randomEventInterval);
+      this.physicsInterval = null;
+    }
+
+    for (const timeout of this.timeouts) {
+      clearTimeout(timeout);
+    }
+
+    this.timeouts.clear();
+
+    window.onmousemove = null;
+    window.onmouseup = null;
+
+    if (lainElements) {
+      lainElements.lainSprite.onmousedown = null;
+      lainElements.container.remove();
+      this.lainElements = null;
+    }
+
+    lainState.position = { x: 100, y: 100 };
+    lainState.velocity = { x: 0, y: 0 };
+    lainState.target = { x: 100, y: 100 };
+    lainState.mode = "idle";
+    lainState.isDragging = false;
+    lainState.eventActive = false;
+    lainState.sugarRush = false;
+  }
+
+  public isRunning() {
+    return this.lainElements !== null;
+  }
+
+  public wear(outfit: LainState["outfit"]) {
     this.state.outfit = outfit;
+  }
+
+  public forceRoll() {
+    this.triggerSpecialEvent("bear");
+  }
+
+  public forceBurn() {
+    this.triggerSpecialEvent("school");
+  }
+
+  public forceDance() {
+    this.triggerSpecialEvent("pink");
+  }
+
+  public sugarRush() {
+    this.triggerSugarRush();
+  }
+
+  public express() {
+    this.triggerExpression();
+  }
+
+  public speak(text?: string) {
+    this.showDialogue(text);
   }
 
   private draw() {
@@ -230,5 +302,82 @@ export class LainPet {
       x: Math.random() * (window.innerWidth - SPRITE_SIZE.normal),
       y: Math.random() * (window.innerHeight - SPRITE_SIZE.normal),
     };
+  }
+
+  private triggerExpression() {
+    const lainState = this.state;
+    const lainElements = this.lainElements;
+
+    if (!lainElements || lainState.eventActive) return;
+
+    const expressionUrl =
+      lainState.outfit === "bear" ? assets.misc.exp2 : assets.misc.exp1;
+
+    lainElements.expression.src = expressionUrl;
+    this.showTemporarily(lainElements.expression, 3000);
+  }
+
+  private triggerSpecialEvent(outfit: LainState["outfit"] = this.state.outfit) {
+    const lainState = this.state;
+    const lainElements = this.lainElements;
+
+    if (!lainElements || lainState.eventActive) return;
+
+    const eventAsset = assets[outfit]?.event;
+    if (!eventAsset) return;
+
+    const eventDurations: Partial<Record<LainState["outfit"], number>> = {
+      bear: 8000,
+      school: 3000,
+      pink: 10000,
+    };
+
+    const duration = eventDurations[outfit] ?? 10000;
+    lainState.eventActive = true;
+    lainElements.lainSprite.src = eventAsset;
+    this.draw();
+
+    setTimeout(() => {
+      lainState.eventActive = false;
+      lainState.mode = "idle";
+      this.draw();
+    }, duration);
+  }
+
+  private showTemporarily(lainElements: HTMLElement, duration: number) {
+    lainElements.style.opacity = "1";
+
+    setTimeout(() => {
+      lainElements.style.opacity = "0";
+    }, duration);
+  }
+
+  private triggerSugarRush() {
+    const lainState = this.state;
+    const randomSign = () => (Math.random() > 0.5 ? 1 : -1);
+    lainState.sugarRush = true;
+    lainState.velocity = scale(
+      {
+        x: randomSign(),
+        y: randomSign(),
+      },
+      10,
+    );
+    setTimeout(() => (lainState.sugarRush = false), 5000);
+  }
+
+  private showDialogue(text?: string) {
+    const lainElements = this.lainElements;
+    if (!lainElements) return;
+
+    const message =
+      text ?? dialogues[Math.floor(Math.random() * dialogues.length)];
+
+    lainElements.bubble.textContent = message;
+    lainElements.bubble.style.opacity = "1";
+
+    setTimeout(() => {
+      lainElements.bubble.style.opacity = "0";
+    }, 4000);
   }
 }

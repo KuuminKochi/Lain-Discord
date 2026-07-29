@@ -2,40 +2,7 @@ import definePlugin from "@utils/types";
 import { ApplicationCommandOptionType } from "@api/Commands";
 import { LainPet } from "./classes/LainPet";
 
-class Navi {
-  private item: HTMLImageElement | null = null;
-  private landed = false;
-}
-
 function startLain() {
-  function triggerExpression() {
-    if (state.eventActive) return;
-    expression.src =
-      state.outfit === "bear" ? assets.misc.exp2 : assets.misc.exp1;
-    expression.style.opacity = "1";
-    setTimeout(() => {
-      expression.style.opacity = "0";
-    }, 3000);
-  }
-
-  function triggerSpecialEvent(type?: string) {
-    if (state.eventActive) return;
-    state.eventActive = true;
-    const eventType = type || state.outfit;
-    const eventAsset = (assets as any)[eventType]?.event;
-    if (eventAsset) {
-      lain.src = eventAsset;
-      const duration =
-        eventType === "bear" ? 8000 : eventType === "school" ? 3000 : 10000;
-      setTimeout(() => {
-        state.eventActive = false;
-        state.mode = "idle";
-      }, duration);
-    } else {
-      state.eventActive = false;
-    }
-  }
-
   function spawnMisc(type: "crow" | "girl") {
     const item = document.createElement("img");
     item.src = assets.misc[type];
@@ -83,20 +50,6 @@ function startLain() {
     }, 15000);
   }
 
-  function triggerSugarRush() {
-    state.sugarRush = true;
-    state.vx = 10 * (Math.random() > 0.5 ? 1 : -1);
-    state.vy = 10 * (Math.random() > 0.5 ? 1 : -1);
-    setTimeout(() => (state.sugarRush = false), 5000);
-  }
-
-  function showDialogue(t?: string) {
-    bubble.innerText =
-      t || dialogues[Math.floor(Math.random() * dialogues.length)];
-    bubble.style.opacity = "1";
-    setTimeout(() => (bubble.style.opacity = "0"), 4000);
-  }
-
   intervals.push(setInterval(updatePhysics, 30));
   intervals.push(
     setInterval(() => {
@@ -119,31 +72,6 @@ function startLain() {
       }
     }, 60000),
   );
-
-  lainGlobal = {
-    forceRoll: () => triggerSpecialEvent("bear"),
-    forceBurn: () => triggerSpecialEvent("school"),
-    forceDance: () => triggerSpecialEvent("pink"),
-    dropNavi: () => dropNavi(),
-    sugarRush: () => triggerSugarRush(),
-    setOutfit: (o: string) => {
-      if ((assets as any)[o]) state.outfit = o;
-    },
-    spawnCrow: () => spawnMisc("crow"),
-    spawnGirl: () => spawnMisc("girl"),
-    speak: (t: string) => showDialogue(t),
-    express: () => triggerExpression(),
-  };
-}
-
-function stopLain() {
-  intervals.forEach(clearInterval);
-  intervals = [];
-  if (container) {
-    container.remove();
-    container = null;
-  }
-  lainGlobal = null;
 }
 
 const lainPet = new LainPet();
