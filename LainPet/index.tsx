@@ -1,88 +1,104 @@
 import definePlugin from "@utils/types";
 import { ApplicationCommandOptionType } from "@api/Commands";
+import { FlyingMisc } from "./classes/FlyingMisc";
 import { LainPet } from "./classes/LainPet";
+import { Navi } from "./classes/Navi";
+import { assets } from "./data/assets";
+import { magnitude, subtract } from "./types/Vector2";
 
-function startLain() {
-  function spawnMisc(type: "crow" | "girl") {
-    const item = document.createElement("img");
-    item.src = assets.misc[type];
-    const size = type === "crow" ? 120 : 100;
-    item.style.cssText = `position:fixed; width:${size}px; z-index:9998; pointer-events:none; transition: left 8s linear; top: ${Math.random() * (window.innerHeight - size)}px;`;
-    const startX = Math.random() < 0.5 ? -size : window.innerWidth + size;
-    item.style.left = `${startX}px`;
-    const movingRight = startX < 0;
-    item.style.transform =
-      type === "crow"
-        ? movingRight
-          ? "scaleX(1)"
-          : "scaleX(-1)"
-        : movingRight
-          ? "scaleX(-1)"
-          : "scaleX(1)";
-    document.body.appendChild(item);
-    setTimeout(() => {
-      item.style.left = `${movingRight ? window.innerWidth + size : -size}px`;
-    }, 100);
-    setTimeout(() => item.remove(), 9000);
-  }
-
-  function dropNavi() {
-    if (naviItem) return;
-    const navi = document.createElement("img");
-    navi.src = assets.misc.navi[Math.floor(Math.random() * 3)];
-    navi.style.cssText = `position:fixed; width:120px; z-index:9997; pointer-events:none; transition: top 6s linear; top:-150px;`;
-    navi.style.left = `${Math.random() * (window.innerWidth - 120)}px`;
-    document.body.appendChild(navi);
-    naviItem = navi;
-    naviLanded = false;
-    setTimeout(() => {
-      navi.style.top = `${window.innerHeight - 150}px`;
-    }, 100);
-    setTimeout(() => {
-      naviLanded = true;
-    }, 6000);
-    setTimeout(() => {
-      if (naviItem === navi) {
-        navi.remove();
-        naviItem = null;
-        naviLanded = false;
-      }
-    }, 15000);
-  }
-
-  intervals.push(setInterval(updatePhysics, 30));
-  intervals.push(
-    setInterval(() => {
-      if (Math.random() < 0.2) showDialogue();
-      if (Math.random() < 0.2) triggerExpression();
-      if (Math.random() < 0.1) spawnMisc(Math.random() < 0.5 ? "crow" : "girl");
-      if (Math.random() < 0.05) dropNavi();
-    }, 15000),
-  );
-
-  intervals.push(
-    setInterval(() => {
-      const outfits = ["default", "school", "pink", "bear", "home"];
-      const randomOutfit = outfits[Math.floor(Math.random() * outfits.length)];
-      if (assets[randomOutfit as keyof typeof assets])
-        state.outfit = randomOutfit;
-
-      if (Math.random() < 0.4) {
-        triggerSpecialEvent();
-      }
-    }, 60000),
-  );
-}
 
 const lainPet = new LainPet();
+const navi = new Navi(assets.misc.navi);
+const flyingMisc = new FlyingMisc({
+  crow: assets.misc.crow,
+  girl: assets.misc.girl,
+});
+
+let ambientInterval: number | null = null;
+let outfitInterval: number | null = null;
+let naviInterval: number | null = null;
+const OUTFITS = ["default", "school", "pink", "bear", "home"] as const;
+type Outfit = (typeof OUTFITS)[number];
+
+function isOutfit(value: string): value is Outfit {
+  return OUTFITS.includes(value as Outfit);
+}
+function updateNaviInteraction() {
+  if (!navi.isLanded()) return;
+
+  const lainPosition = lainPet.getPosition();
+  const naviPosition = navi.getPosition();
+
+  if (!lainPosition || !naviPosition) return;
+
+  lainPet.moveTo(naviPosition);
+
+  const lainCenter = {
+    x: lainPosition.x + 50,
+    y: lainPosition.y + 50,
+  };
+  const naviCenter = {
+    x: naviPosition.x + 60,
+    y: naviPosition.y + 60,
+  };
+
+  if (magnitude(subtract(lainCenter, naviCenter)) >= 30) return;
+  if (!navi.collect()) return;
+
+  lainPet.sugarRush();
+  lainPet.speak("NAVI COLLECTED.");
+}
+
+function startAmbientBehavior() {
+  if (ambientInterval !== null) return;
+
+  ambientInterval = window.setInterval(() => {
+    if (Math.random() < 0.2) lainPet.speak();
+    if (Math.random() < 0.2) lainPet.express();
+    if (Math.random() < 0.1) {
+      flyingMisc.spawn(Math.random() < 0.5 ? "crow" : "girl");
+    }
+    if (Math.random() < 0.05) navi.drop();
+  }, 15000);
+
+  outfitInterval = window.setInterval(() => {
+    const randomOutfit = OUTFITS[Math.floor(Math.random() * OUTFITS.length)];
+
+    lainPet.wear(randomOutfit);
+
+    if (Math.random() < 0.4) {
+      lainPet.specialEvent();
+    }
+  }, 60000);
+
+  naviInterval = window.setInterval(updateNaviInteraction, 30);
+}
+
+function stopAmbientBehavior() {
+  if (ambientInterval !== null) {
+    window.clearInterval(ambientInterval);
+    ambientInterval = null;
+  }
+
+  if (outfitInterval !== null) {
+    window.clearInterval(outfitInterval);
+    outfitInterval = null;
+  }
+
+  if (naviInterval !== null) {
+    window.clearInterval(naviInterval);
+    naviInterval = null;
+  }
+}
 
 export default definePlugin({
   name: "LainPet",
-  description: "A cute Lain desktop pet for vendicated Vencord",
+  description:
+    "A cute Lain desktop pet by realmxrza — Lain-Discord custom build",
   authors: [
     {
       name: "realmxrza",
-      id: "1348602887986745385",
+      id: 1348602887986745385n,
     },
   ],
 
@@ -97,19 +113,15 @@ export default definePlugin({
           type: ApplicationCommandOptionType.STRING,
           required: true,
           choices: [
-            { name: "Roll", value: "roll", displayName: "Roll" },
-            { name: "Burn", value: "burn", displayName: "Burn" },
-            { name: "Dance", value: "dance", displayName: "Dance" },
-            { name: "Drop Navi", value: "navi", displayName: "Drop Navi" },
-            {
-              name: "Sugar Rush",
-              value: "sugarrush",
-              displayName: "Sugar Rush",
-            },
-            { name: "Spawn Crow", value: "crow", displayName: "Spawn Crow" },
-            { name: "Spawn Girl", value: "girl", displayName: "Spawn Girl" },
-            { name: "Express", value: "express", displayName: "Express" },
-            { name: "Speak", value: "speak", displayName: "Speak" },
+            { name: "Roll", label: "Roll", value: "roll" },
+            { name: "Burn", label: "Burn", value: "burn" },
+            { name: "Dance", label: "Dance", value: "dance" },
+            { name: "Drop Navi", label: "Drop Navi", value: "navi" },
+            { name: "Sugar Rush", label: "Sugar Rush", value: "sugarrush" },
+            { name: "Spawn Crow", label: "Spawn Crow", value: "crow" },
+            { name: "Spawn Girl", label: "Spawn Girl", value: "girl" },
+            { name: "Express", label: "Express", value: "express" },
+            { name: "Speak", label: "Speak", value: "speak" },
           ],
         },
         {
@@ -119,49 +131,53 @@ export default definePlugin({
           type: ApplicationCommandOptionType.STRING,
           required: false,
           choices: [
-            { name: "Default", value: "default", displayName: "Default" },
-            { name: "School", value: "school", displayName: "School" },
-            { name: "Pink", value: "pink", displayName: "Pink" },
-            { name: "Bear", value: "bear", displayName: "Bear" },
-            { name: "Home", value: "home", displayName: "Home" },
+            { name: "Default", label: "Default", value: "default" },
+            { name: "School", label: "School", value: "school" },
+            { name: "Pink", label: "Pink", value: "pink" },
+            { name: "Bear", label: "Bear", value: "bear" },
+            { name: "Home", label: "Home", value: "home" },
           ],
         },
       ],
       execute: (args) => {
-        if (!lainGlobal) return { content: "Lain pet is not running!" };
+        if (!lainPet.isRunning()) {
+          return { content: "Lain pet is not running! " };
+        }
 
         const action = args.find((a) => a.name === "action")?.value;
         const outfit = args.find((a) => a.name === "outfit")?.value;
 
-        if (outfit) lainGlobal.setOutfit(outfit);
+        if (typeof outfit === "string" && isOutfit(outfit)) {
+          lainPet.wear(outfit);
+        }
 
         switch (action) {
           case "roll":
-            lainGlobal.forceRoll();
+            lainPet.forceRoll();
             break;
           case "burn":
-            lainGlobal.forceBurn();
+            lainPet.forceBurn();
             break;
           case "dance":
-            lainGlobal.forceDance();
-            break;
-          case "navi":
-            lainGlobal.dropNavi();
+            lainPet.forceDance();
             break;
           case "sugarrush":
-            lainGlobal.sugarRush();
-            break;
-          case "crow":
-            lainGlobal.spawnCrow();
-            break;
-          case "girl":
-            lainGlobal.spawnGirl();
+            lainPet.sugarRush();
             break;
           case "express":
-            lainGlobal.express();
+            lainPet.express();
             break;
           case "speak":
-            lainGlobal.speak();
+            lainPet.speak();
+            break;
+          case "crow":
+            flyingMisc.spawn("crow");
+            break;
+          case "girl":
+            flyingMisc.spawn("girl");
+            break;
+          case "navi":
+            navi.drop();
             break;
         }
       },
@@ -170,16 +186,20 @@ export default definePlugin({
 
   start() {
     lainPet.start();
+    startAmbientBehavior();
     console.log(
-      "%c Lain Pet Plugin Started ",
+      "%c Lain Pet by realmxrza | custom Lain-Discord build started ",
       "background: #000; color: #f0f; font-weight: bold; font-size: 14px;",
     );
   },
 
   stop() {
+    stopAmbientBehavior();
+    navi.stop();
+    flyingMisc.stop();
     lainPet.stop();
     console.log(
-      "%c Lain Pet Plugin Stopped ",
+      "%c Lain Pet by realmxrza | custom Lain-Discord build stopped ",
       "background: #000; color: #f0f; font-weight: bold; font-size: 14px;",
     );
   },

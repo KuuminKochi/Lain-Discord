@@ -52,19 +52,7 @@ const initLainPet = () => {
     },
   };
 
-  const dialogues = [
-    "Present day. Present time. Hahahaha!",
-    "Why don't you come to the Wired?",
-    "No matter where you are, everyone is always connected.",
-    "No matter where you are, everyone is always connected.",
-    "You're wrong.",
-    "Don't worry. I'm still me.",
-    "check out mxrza.xyz",
-    "Let's All Love Lain.",
-    "Why are you crying Lain",
-    "The real world isn't real at all.",
-    "also check out kuumin (website pending)",
-  ];
+  const dialogues = [];
   let state = {
     x: 100,
     y: 100,
