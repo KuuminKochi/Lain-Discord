@@ -1,5 +1,5 @@
 import { FlyingMisc } from "./LainPet/classes/FlyingMisc";
-import { LainPet } from "./LainPet/classes/LainPet";
+import { LainPetRuntime } from "./LainPet/classes/LainPetRuntime";
 import { Navi } from "./LainPet/classes/Navi";
 import { assets } from "./LainPet/data/assets";
 import { magnitude, subtract, type Vector2 } from "./LainPet/types/Vector2";
@@ -22,6 +22,8 @@ type LainPetApi = {
   speak(text?: string): void;
   express(): void;
   moveTo(target: Vector2): void;
+  sineMoveTo(target: Vector2): void;
+  parabolicMoveTo(target: Vector2, height?: number): void;
   getPosition(): Vector2 | null;
 };
 
@@ -32,7 +34,8 @@ declare global {
   }
 }
 
-const lainPet = new LainPet();
+const runtime = new LainPetRuntime();
+const lainPet = runtime.getPet();
 const navi = new Navi(assets.misc.navi);
 const flyingMisc = new FlyingMisc({
   crow: assets.misc.crow,
@@ -42,6 +45,7 @@ const flyingMisc = new FlyingMisc({
 let ambientInterval: number | null = null;
 let outfitInterval: number | null = null;
 let naviInterval: number | null = null;
+let pendingStart: (() => void) | null = null;
 
 function updateNaviInteraction() {
   if (!navi.isLanded()) return;
@@ -112,7 +116,7 @@ function stopAmbientBehavior() {
 }
 
 function start() {
-  lainPet.start();
+  runtime.start();
   startAmbientBehavior();
   console.log(
     "%c Lain Pet by realmxrza | standalone browser snippet started ",
@@ -121,10 +125,14 @@ function start() {
 }
 
 function stop() {
+  if (pendingStart) {
+    document.removeEventListener("DOMContentLoaded", pendingStart);
+    pendingStart = null;
+  }
   stopAmbientBehavior();
   navi.stop();
   flyingMisc.stop();
-  lainPet.stop();
+  runtime.stop();
   console.log(
     "%c Lain Pet by realmxrza | standalone browser snippet stopped ",
     "background: #000; color: #f0f; font-weight: bold; font-size: 14px;",
@@ -146,6 +154,11 @@ const api: LainPetApi = {
   speak: (text) => lainPet.speak(text),
   express: () => lainPet.express(),
   moveTo: (target) => lainPet.moveTo(target),
+  sineMoveTo: (target) => lainPet.sineMoveTo(target),
+  parabolicMoveTo: (target, height) =>
+    height === undefined
+      ? lainPet.parabolicMoveTo(target)
+      : lainPet.parabolicMoveTo(target, height),
   getPosition: () => lainPet.getPosition(),
 };
 
@@ -155,7 +168,11 @@ function install() {
   window.Lain = api;
 
   if (document.readyState === "loading") {
-    window.addEventListener("DOMContentLoaded", start, { once: true });
+    pendingStart = () => {
+      pendingStart = null;
+      start();
+    };
+    document.addEventListener("DOMContentLoaded", pendingStart, { once: true });
   } else {
     start();
   }

@@ -1,116 +1,84 @@
-import { TimeoutRegistry } from "./TimeoutRegistry";
 import { assets, dialogues } from "../data/assets";
-import { LainElements } from "../types/LainElements";
-import { LainState } from "../types/LainState";
+import type { LainState } from "../types/LainState";
 import {
   add,
-  subtract,
   magnitude,
   scale,
-  Vector2,
+  subtract,
+  type Vector2,
 } from "../types/Vector2";
+import type {
+  DialogueSnapshot,
+  ExpressionSnapshot,
+  LainPetOptions,
+  LainPetSnapshot,
+  RandomSource,
+  Viewport,
+} from "../types/LainPetSnapshot";
+import {
+  parabolaFunction,
+  rotateFunction,
+  sineFunction,
+  type ParametricFunction,
+} from "../types/ParametricCurve";
 
 const SPRITE_SIZE = {
   normal: 100,
   event: 200,
-};
+} as const;
 const IDLE_DURATION = 5000;
 const MOVEMENT_TIMEOUT = 10000;
-const WALK_RADIUS = 500;
+const WALK_RADIUS = 1000;
 const WALK_MIN_DISTANCE = 100;
 const TARGET_RADIUS = 5;
+const TARGET_TOLERANCE = 1e-6;
+const FRAME_DURATION = 30;
+const MAX_ELAPSED = 100;
+const WAVE_AMPLITUDE = 40;
+const WAVE_CYCLES = 1.5;
+const PARABOLA_HEIGHT = 80;
+const AUTONOMOUS_WALK_CHANCE = 0.005;
+const AUTONOMOUS_SINE_CHANCE = 0.15;
+const AUTONOMOUS_PARABOLA_CHANCE = 0.15;
+const SUGAR_RUSH_MIN_DISTANCE = 180;
+const SUGAR_RUSH_MAX_DISTANCE = 360;
+const SUGAR_RUSH_SINE_CHANCE = 0.5;
+const SUGAR_RUSH_SPEED = 13;
 
+const EVENT_DURATIONS: Partial<Record<LainState["outfit"], number>> = {
+  bear: 8000,
+  school: 3000,
+  pink: 10000,
+};
+
+type TimedState = {
+  remaining: number;
+  invocation: number;
+};
+
+
+type MovementPath = "direct" | "sine" | "parabola";
 export class LainPet {
-  private lainElements: LainElements | null = null;
-  private physicsInterval: number | null = null;
-  private timeouts = new TimeoutRegistry();
-  private idleUntil = 0;
-  private movementTimeout: number | null = null;
+  private running = false;
+  private random: RandomSource;
   private movementTarget: Vector2 | null = null;
+  private movementStart: Vector2 | null = null;
+  private movementProgress = 0;
+  private movementDistance = 0;
+  private movementCurve: ParametricFunction | null = null;
+  private movementPath: MovementPath = "direct";
+  private movementPathHeight = 0;
+  private movementRemaining = 0;
   private movementTimedOut = false;
+  private idleRemaining = 0;
+  private expression: TimedState = { remaining: 0, invocation: 0 };
+  private dialogue: TimedState = { remaining: 0, invocation: 0 };
+  private sugarRushState: TimedState = { remaining: 0, invocation: 0 };
+  private event: TimedState = { remaining: 0, invocation: 0 };
+  private eventOutfit: LainState["outfit"] | null = null;
+  private dialogueText: string | null = null;
+  private expressionAsset: string | null = null;
   private facing: "left" | "right" = "right";
-  private expressionTimeout: number | null = null;
-  private dialogueTimeout: number | null = null;
-  private sugarRushTimeout: number | null = null;
-  private eventTimeout: number | null = null;
-  private expressionInvocation = 0;
-  private dialogueInvocation = 0;
-  private sugarRushInvocation = 0;
-  private eventInvocation = 0;
-  private dragMoveHandler: ((event: MouseEvent) => void) | null = null;
-  private dragUpHandler: (() => void) | null = null;
-  private schedule(callback: () => void, delay: number): number {
-    return this.timeouts.schedule(callback, delay);
-  }
-  private cancelTimeout(timeoutId: number | null): void {
-    this.timeouts.cancel(timeoutId);
-  }
-  private removeDragListeners() {
-    if (this.dragMoveHandler) {
-      window.removeEventListener("mousemove", this.dragMoveHandler);
-      this.dragMoveHandler = null;
-    }
-
-    if (this.dragUpHandler) {
-      window.removeEventListener("mouseup", this.dragUpHandler);
-      this.dragUpHandler = null;
-    }
-  }
-  private cancelMovementTimeout() {
-    if (this.movementTimeout === null) return;
-
-    this.cancelTimeout(this.movementTimeout);
-    this.movementTimeout = null;
-  }
-
-  private startMovement(
-    target: Vector2,
-    timeout = MOVEMENT_TIMEOUT,
-  ): boolean {
-    const sameTarget =
-      this.movementTarget?.x === target.x &&
-      this.movementTarget?.y === target.y;
-
-    if (sameTarget && this.state.mode === "walk") {
-      return true;
-    }
-
-    if (
-      sameTarget &&
-      this.movementTimedOut &&
-      Date.now() < this.idleUntil
-    ) {
-      return false;
-    }
-
-    this.cancelMovementTimeout();
-    this.movementTarget = { ...target };
-    this.movementTimedOut = false;
-    this.state.target = { ...target };
-    this.state.mode = "walk";
-
-    const timeoutId = this.schedule(() => {
-      if (this.movementTimeout !== timeoutId) return;
-
-      this.movementTimeout = null;
-      this.movementTimedOut = true;
-      this.state.mode = "idle";
-      this.state.velocity = { x: 0, y: 0 };
-      this.idleUntil = Date.now() + IDLE_DURATION;
-    }, timeout);
-
-    this.movementTimeout = timeoutId;
-    return true;
-  }
-
-  private finishMovement() {
-    this.cancelMovementTimeout();
-    this.movementTarget = null;
-    this.movementTimedOut = false;
-    this.state.mode = "idle";
-    this.state.velocity = { x: 0, y: 0 };
-    this.idleUntil = Date.now() + IDLE_DURATION;
-  }
 
   private state: LainState = {
     position: { x: 100, y: 100 },
@@ -124,469 +92,571 @@ export class LainPet {
     sugarRush: false,
   };
 
-  public start() {
-    if (this.lainElements) return;
-    const lainState = this.state;
-
-    const container = document.createElement("div");
-    const lainSprite = document.createElement("img");
-    const bubble = document.createElement("div");
-    const expression = document.createElement("img");
-
-
-    this.lainElements = {
-      container,
-      lainSprite,
-      bubble,
-      expression,
-    };
-
-    container.style.cssText = `
-	position:fixed;
-	z-index:9999;
-	pointer-events:none;
-	top:0;
-	left:0;
-	width:100vw;
-	height:100vh;
-	`;
-
-    lainSprite.style.cssText = `
-	position:absolute;
-	width:100px;
-	pointer-events:auto;
-	cursor:grab;
-	transition: filter 0.2s;
-	object-fit: contain;
-	`;
-
-    bubble.style.cssText = `
-	position:absolute;
-	background:white;
-	color:black; border:2px solid black;
-	padding:8px;
-	border-radius:10px;
-	font-family:monospace;
-	font-size:12px; opacity:0;
-	transition: opacity 0.5s;
-	width:150px;
-	text-align:center;
-	z-index:10000;
-	pointer-events:none;
-	`;
-
-    expression.style.cssText = `
-	position:absolute;
-	width:50px;
-	opacity:0;
-	transition: opacity 0.3s;
-	z-index:10001;
-	pointer-events:none;
-	`;
-
-    lainSprite.onmousedown = (event) => {
-      event.preventDefault();
-      lainState.isDragging = true;
-      this.removeDragListeners();
-
-      const dragMoveHandler = (ev: MouseEvent) => {
-        lainState.position.x = ev.clientX - 50;
-        lainState.position.y = ev.clientY - 50;
-        this.draw();
-      };
-      const dragUpHandler = () => {
-        lainState.isDragging = false;
-        this.removeDragListeners();
-      };
-
-      this.dragMoveHandler = dragMoveHandler;
-      this.dragUpHandler = dragUpHandler;
-      window.addEventListener("mousemove", dragMoveHandler);
-      window.addEventListener("mouseup", dragUpHandler);
-    };
-
-    document.body.appendChild(container);
-    container.appendChild(lainSprite);
-    container.appendChild(bubble);
-    container.appendChild(expression);
-
-    this.physicsInterval = window.setInterval(() => {
-      this.updatePhysics();
-    }, 30);
+  public constructor(options: LainPetOptions | RandomSource = {}) {
+    this.random =
+      typeof options === "function" ? options : options.random ?? (() => 0.5);
   }
 
-  public stop() {
-    const lainState = this.state;
-    const lainElements = this.lainElements;
-    if (this.physicsInterval !== null) {
-      window.clearInterval(this.physicsInterval);
-      this.physicsInterval = null;
-    }
-    this.cancelMovementTimeout();
-    this.timeouts.clear();
-    this.expressionTimeout = null;
-    this.dialogueTimeout = null;
-    this.sugarRushTimeout = null;
-    this.eventTimeout = null;
-    this.expressionInvocation++;
-    this.dialogueInvocation++;
-    this.sugarRushInvocation++;
-    this.eventInvocation++;
+  public start(): void {
+    this.running = true;
+  }
 
-    this.removeDragListeners();
-
-    if (lainElements) {
-      lainElements.lainSprite.onmousedown = null;
-      lainElements.container.remove();
-      this.lainElements = null;
-    }
-
-    lainState.position = { x: 100, y: 100 };
-    lainState.velocity = { x: 0, y: 0 };
-    lainState.target = { x: 100, y: 100 };
-    lainState.mode = "idle";
-    lainState.isDragging = false;
-    lainState.eventActive = false;
-    lainState.sugarRush = false;
-    this.idleUntil = 0;
-    this.movementTarget = null;
-    this.movementTimedOut = false;
+  public stop(): void {
+    this.running = false;
+    this.resetMovement();
+    this.state.position = { x: 100, y: 100 };
+    this.state.velocity = { x: 0, y: 0 };
+    this.state.target = { x: 100, y: 100 };
+    this.state.mode = "idle";
+    this.state.isDragging = false;
+    this.state.eventActive = false;
+    this.state.sugarRush = false;
+    this.idleRemaining = 0;
+    this.expression = { remaining: 0, invocation: this.expression.invocation + 1 };
+    this.dialogue = { remaining: 0, invocation: this.dialogue.invocation + 1 };
+    this.sugarRushState = {
+      remaining: 0,
+      invocation: this.sugarRushState.invocation + 1,
+    };
+    this.event = { remaining: 0, invocation: this.event.invocation + 1 };
+    this.eventOutfit = null;
+    this.dialogueText = null;
+    this.expressionAsset = null;
     this.facing = "right";
   }
 
-  public isRunning() {
-    return this.lainElements !== null;
+  public isRunning(): boolean {
+    return this.running;
   }
 
-  public wear(outfit: LainState["outfit"]) {
+  public wear(outfit: LainState["outfit"]): void {
     this.state.outfit = outfit;
   }
 
-  public forceRoll() {
+  public forceRoll(): void {
     this.triggerSpecialEvent("bear");
   }
 
-  public forceBurn() {
+  public forceBurn(): void {
     this.triggerSpecialEvent("school");
   }
 
-  public forceDance() {
+  public forceDance(): void {
     this.triggerSpecialEvent("pink");
   }
 
-  public sugarRush() {
+  public sugarRush(): void {
     this.triggerSugarRush();
   }
 
-  public express() {
+  public express(): void {
     this.triggerExpression();
   }
 
-  public speak(text?: string) {
+  public speak(text?: string): void {
     this.showDialogue(text);
   }
-  public specialEvent() {
+
+  public specialEvent(): void {
     this.triggerSpecialEvent();
   }
 
   public getPosition(): Vector2 | null {
-    if (!this.isRunning()) return null;
-
+    if (!this.running) return null;
     return { ...this.state.position };
   }
-  private isWithinTargetRadius(target: Vector2) {
-    return (
-      magnitude(subtract(target, this.state.position)) <= TARGET_RADIUS
-    );
+
+  public snapshot(): LainPetSnapshot {
+    const dialogue: DialogueSnapshot = {
+      visible: this.dialogue.remaining > 0,
+      text: this.dialogueText,
+    };
+    const expression: ExpressionSnapshot = {
+      visible: this.expression.remaining > 0,
+      asset: this.expressionAsset,
+    };
+
+    return {
+      ...this.state,
+      position: { ...this.state.position },
+      velocity: { ...this.state.velocity },
+      target: { ...this.state.target },
+      facing: this.facing,
+      dialogue,
+      eventOutfit: this.eventOutfit,
+      expression,
+    };
   }
 
-  public moveTo(target: Vector2) {
-    if (!this.isRunning() || this.state.sugarRush) return;
+  public getSnapshot(): LainPetSnapshot {
+    return this.snapshot();
+  }
+
+  public beginDrag(position?: Vector2): void {
+    if (!this.running) return;
+
+    this.cancelMovement();
+    if (position) {
+      this.state.position = { ...position };
+      this.state.target = { ...position };
+    }
+    this.state.isDragging = true;
+  }
+
+  public updateDrag(position: Vector2): void {
+    if (!this.running || !this.state.isDragging) return;
+
+    this.state.position = { ...position };
+    this.state.target = { ...position };
+    this.state.velocity = { x: 0, y: 0 };
+  }
+
+  public endDrag(): void {
+    if (!this.running) return;
+
+    this.state.isDragging = false;
+    this.cancelMovement();
+  }
+
+  public moveTo(target: Vector2): void {
+    this.requestMovement(target, "direct");
+  }
+
+  public sineMoveTo(target: Vector2): void {
+    this.requestMovement(target, "sine");
+  }
+
+  public parabolicMoveTo(
+    target: Vector2,
+    height = PARABOLA_HEIGHT,
+  ): void {
+    this.requestMovement(target, "parabola", height);
+  }
+
+  private requestMovement(
+    target: Vector2,
+    path: MovementPath,
+    height = PARABOLA_HEIGHT,
+  ): void {
+    if (!this.running || this.state.sugarRush) return;
 
     this.state.target = { ...target };
-
     if (this.isWithinTargetRadius(target)) {
       this.finishMovement();
       return;
     }
 
-    this.startMovement(target);
+    this.startMovement(target, MOVEMENT_TIMEOUT, path, height);
   }
 
-  private draw() {
-    if (!this.lainElements) return;
+  /** Advance behavior by at most 100ms; the host owns the frame clock. */
+  public advance(
+    elapsedMs: number,
+    viewport: Viewport,
+    random: RandomSource = this.random,
+  ): LainPetSnapshot {
+    if (!this.running) return this.snapshot();
+    const previousRandom = this.random;
+    this.random = random;
+    try {
+      const elapsed = Number.isFinite(elapsedMs)
+        ? Math.max(0, Math.min(MAX_ELAPSED, elapsedMs))
+        : 0;
+      this.expireTimedStates(elapsed);
+      if (this.state.isDragging) return this.snapshot();
 
-    const lainState = this.state;
-
-    const lainSpriteStyle = this.lainElements?.lainSprite.style;
-    const lainBubbleStyle = this.lainElements?.bubble.style;
-    const lainExpressionStyle = this.lainElements?.expression.style;
-    const size = this.state.eventActive
-      ? SPRITE_SIZE.event
-      : SPRITE_SIZE.normal;
-
-    lainSpriteStyle.width = `${size}px`;
-    lainSpriteStyle.left = `${lainState.position.x}px`;
-    lainSpriteStyle.top = `${lainState.position.y}px`;
-    lainBubbleStyle.left = `${lainState.position.x + size / 2 - 75}px`;
-    lainBubbleStyle.top = `${lainState.position.y - 50}px`;
-    lainExpressionStyle.left = `${lainState.position.x + size / 2 - 25}px`;
-    lainExpressionStyle.top = `${lainState.position.y - 40}px`;
-
-    if (!lainState.eventActive) {
-      const outfitAssets = assets[lainState.outfit];
-      let spriteUrl = outfitAssets.idle;
-
-      if (lainState.mode === "walk") {
-        spriteUrl =
-          this.facing === "right" ? outfitAssets.right : outfitAssets.left;
+      if (this.state.eventActive) {
+        this.moveToEventCenter(viewport, elapsed);
+      } else if (this.state.sugarRush) {
+        this.moveDuringSugarRush(viewport, elapsed);
+      } else if (this.state.mode === "walk") {
+        this.moveTowardTarget(elapsed);
+      } else {
+        this.tryToStartWalking(viewport, elapsed);
       }
 
-      if (this.lainElements.lainSprite.src !== spriteUrl) {
-        this.lainElements.lainSprite.src = spriteUrl;
+      return this.snapshot();
+    } finally {
+      this.random = previousRandom;
+    }
+  }
+
+  private expireTimedStates(elapsed: number): void {
+    if (this.idleRemaining > 0) {
+      this.idleRemaining = Math.max(0, this.idleRemaining - elapsed);
+    }
+
+    if (this.movementRemaining > 0) {
+      this.movementRemaining -= elapsed;
+      if (this.movementRemaining <= 0) {
+        this.movementRemaining = 0;
+        this.movementTimedOut = true;
+        this.state.mode = "idle";
+        this.state.velocity = { x: 0, y: 0 };
+        this.idleRemaining = IDLE_DURATION;
       }
     }
 
-    if (lainState.sugarRush) {
-      const hue = Date.now() % 360;
-
-      lainSpriteStyle.filter = `hue-rotate(${hue}deg) brightness(1.2)`;
-    } else {
-      lainSpriteStyle.filter = "";
+    if (this.expression.remaining > 0) {
+      this.expression.remaining = Math.max(0, this.expression.remaining - elapsed);
+      if (this.expression.remaining === 0) this.expressionAsset = null;
+    }
+    if (this.dialogue.remaining > 0) {
+      this.dialogue.remaining = Math.max(0, this.dialogue.remaining - elapsed);
+      if (this.dialogue.remaining === 0) this.dialogueText = null;
+    }
+    if (this.sugarRushState.remaining > 0) {
+      this.sugarRushState.remaining = Math.max(
+        0,
+        this.sugarRushState.remaining - elapsed,
+      );
+      if (this.sugarRushState.remaining === 0) {
+        this.state.sugarRush = false;
+        this.finishMovement();
+      }
+    }
+    if (this.event.remaining > 0) {
+      this.event.remaining = Math.max(0, this.event.remaining - elapsed);
+      if (this.event.remaining === 0) {
+        this.state.eventActive = false;
+        this.eventOutfit = null;
+        this.finishMovement();
+      }
     }
   }
 
-  private updatePhysics() {
-    const lainState = this.state;
-
-    if (lainState.isDragging) return;
-
-    // this.updateNaviTarget();
-
-    if (lainState.eventActive) {
-      this.moveToEventCenter();
-    } else if (lainState.sugarRush) {
-      this.moveDuringSugarRush();
-    } else if (lainState.mode == "walk") {
-      this.moveTowardTarget();
-    } else {
-      this.tryToStartWalking();
-    }
-
-    this.draw();
+  private isWithinTargetRadius(target: Vector2): boolean {
+    return (
+      magnitude(subtract(target, this.state.position)) <=
+      TARGET_RADIUS + TARGET_TOLERANCE
+    );
   }
 
-  private moveToEventCenter() {
+  private startMovement(
+    target: Vector2,
+    timeout = MOVEMENT_TIMEOUT,
+    path: MovementPath = "direct",
+    pathHeight = PARABOLA_HEIGHT,
+  ): boolean {
+    const sameTarget =
+      this.movementTarget?.x === target.x &&
+      this.movementTarget?.y === target.y;
+    const samePath =
+      this.movementPath === path &&
+      (path !== "parabola" || this.movementPathHeight === pathHeight);
+
+    if (sameTarget && this.state.mode === "walk" && samePath) return true;
+    if (sameTarget && this.movementTimedOut && this.idleRemaining > 0) {
+      return false;
+    }
+
+    this.movementTarget = { ...target };
+    this.movementTimedOut = false;
+    this.movementRemaining = timeout;
+    this.state.target = { ...target };
+    this.state.mode = "walk";
+
+    if (path === "direct") {
+      this.clearMovementPath();
+      return true;
+    }
+
+    const start = { ...this.state.position };
+    const displacement = subtract(target, start);
+    const distance = magnitude(displacement);
+    if (distance === 0) return false;
+
+    const directionDegrees =
+      (Math.atan2(displacement.y, displacement.x) * 180) / Math.PI;
+    const localCurve =
+      path === "sine"
+        ? sineFunction(WAVE_AMPLITUDE, WAVE_CYCLES)
+        : parabolaFunction(pathHeight);
+
+    this.movementStart = start;
+    this.movementProgress = 0;
+    this.movementDistance = distance;
+    this.movementPath = path;
+    this.movementPathHeight = pathHeight;
+    this.movementCurve = rotateFunction(
+      (progress) => {
+        const point = localCurve(progress);
+        return {
+          x: point.x * distance,
+          y: point.y,
+        };
+      },
+      directionDegrees,
+    );
+    return true;
+  }
+
+  private clearMovementPath(): void {
+    this.movementStart = null;
+    this.movementProgress = 0;
+    this.movementDistance = 0;
+    this.movementCurve = null;
+    this.movementPath = "direct";
+    this.movementPathHeight = 0;
+  }
+
+  private cancelMovement(): void {
+    this.movementRemaining = 0;
+    this.movementTarget = null;
+    this.clearMovementPath();
+    this.movementTimedOut = false;
+    this.state.mode = "idle";
+    this.state.velocity = { x: 0, y: 0 };
+    this.state.target = { ...this.state.position };
+  }
+
+  private finishMovement(): void {
+    this.movementRemaining = 0;
+    this.movementTarget = null;
+    this.clearMovementPath();
+    this.movementTimedOut = false;
+    this.state.mode = "idle";
+    this.state.velocity = { x: 0, y: 0 };
+    this.idleRemaining = IDLE_DURATION;
+  }
+
+  private resetMovement(): void {
+    this.movementRemaining = 0;
+    this.movementTarget = null;
+    this.clearMovementPath();
+    this.movementTimedOut = false;
+  }
+
+
+  private moveToEventCenter(viewport: Viewport, elapsed: number): void {
     const size = SPRITE_SIZE.event;
     const center = {
-      x: (window.innerWidth - size) / 2,
-      y: (window.innerHeight - size) / 2,
+      x: (viewport.width - size) / 2,
+      y: (viewport.height - size) / 2,
     };
 
     if (this.isWithinTargetRadius(center)) {
       this.finishMovement();
       return;
     }
-
     if (!this.startMovement(center)) return;
-
-    this.moveToward(center);
+    this.moveToward(center, elapsed);
   }
 
-  private moveToward(target: Vector2) {
-    const lainState = this.state;
+  private moveTowardTarget(elapsed: number): void {
+    this.moveToward(this.state.target, elapsed);
+  }
 
-    if (this.isWithinTargetRadius(target)) {
+  private moveToward(target: Vector2, elapsed: number): void {
+    if (!this.movementCurve) {
+      if (this.isWithinTargetRadius(target)) {
+        this.finishMovement();
+        return;
+      }
+
+      const displacement = subtract(target, this.state.position);
+      const distance = magnitude(displacement);
+      if (distance === 0) {
+        this.finishMovement();
+        return;
+      }
+
+      const step = scale(
+        scale(displacement, 1.0 / distance),
+        Math.min(
+          this.state.speed * (elapsed / FRAME_DURATION),
+          distance - TARGET_RADIUS,
+        ),
+      );
+
+      this.state.velocity = step;
+      this.state.position = add(this.state.position, step);
+
+      if (step.x < 0) this.facing = "left";
+      else if (step.x > 0) this.facing = "right";
+
+      if (this.isWithinTargetRadius(target)) this.finishMovement();
+      return;
+    }
+
+    if (!this.movementStart || this.movementDistance <= 0) {
       this.finishMovement();
       return;
     }
 
-    const displacement = subtract(target, lainState.position);
-    const distance = magnitude(displacement);
-    const step = scale(
-      scale(displacement, 1.0 / distance),
-      Math.min(lainState.speed, distance - TARGET_RADIUS),
+    const previousPosition = { ...this.state.position };
+    const movementSpeed = this.state.sugarRush
+      ? SUGAR_RUSH_SPEED
+      : this.state.speed;
+    const progressDelta =
+      (movementSpeed * (elapsed / FRAME_DURATION)) /
+      this.movementDistance;
+    this.movementProgress = Math.min(
+      1,
+      this.movementProgress + progressDelta,
     );
 
-    lainState.velocity = step;
-    lainState.position = add(lainState.position, step);
+    const nextPosition =
+      this.movementProgress >= 1
+        ? { ...target }
+        : add(this.movementStart, this.movementCurve(this.movementProgress));
+    const step = subtract(nextPosition, previousPosition);
 
-    if (step.x < 0) {
-      this.facing = "left";
-    } else if (step.x > 0) {
-      this.facing = "right";
-    }
+    this.state.velocity = step;
+    this.state.position = nextPosition;
 
-    if (this.isWithinTargetRadius(target)) {
-      this.finishMovement();
-    }
+    if (step.x < 0) this.facing = "left";
+    else if (step.x > 0) this.facing = "right";
+
+    if (this.movementProgress >= 1) this.finishMovement();
   }
 
-  private moveTowardTarget() {
-    this.moveToward(this.state.target);
-  }
-
-  private moveDuringSugarRush() {
-    const lainState = this.state;
-    const maxX = Math.max(0, window.innerWidth - SPRITE_SIZE.normal);
-    const maxY = Math.max(0, window.innerHeight - SPRITE_SIZE.normal);
-
-    lainState.position = add(
-      lainState.position,
-      scale(lainState.velocity, 1.3),
-    );
-
-    if (lainState.position.x <= 0 || lainState.position.x >= maxX) {
-      lainState.velocity.x *= -1;
-    }
-
-    if (lainState.position.y <= 0 || lainState.position.y >= maxY) {
-      lainState.velocity.y *= -1;
-    }
-
-    lainState.position.x = Math.max(0, Math.min(lainState.position.x, maxX));
-    lainState.position.y = Math.max(0, Math.min(lainState.position.y, maxY));
-  }
-
-  private tryToStartWalking() {
-    const lainState = this.state;
-    if (Date.now() < this.idleUntil) return;
-    if (Math.random() >= 0.01) return;
-
-    const angle = Math.random() * Math.PI * 2;
+  private startSugarRushMovement(viewport: Viewport): boolean {
+    const maxX = Math.max(0, viewport.width - SPRITE_SIZE.normal);
+    const maxY = Math.max(0, viewport.height - SPRITE_SIZE.normal);
+    const angle = this.nextRandom() * Math.PI * 2;
     const distance =
-      WALK_MIN_DISTANCE +
-      Math.random() * (WALK_RADIUS - WALK_MIN_DISTANCE);
-    const maxX = Math.max(0, window.innerWidth - SPRITE_SIZE.normal);
-    const maxY = Math.max(0, window.innerHeight - SPRITE_SIZE.normal);
+      SUGAR_RUSH_MIN_DISTANCE +
+      this.nextRandom() *
+        (SUGAR_RUSH_MAX_DISTANCE - SUGAR_RUSH_MIN_DISTANCE);
     const unclampedTarget = {
-      x: lainState.position.x + Math.cos(angle) * distance,
-      y: lainState.position.y + Math.sin(angle) * distance,
+      x: this.state.position.x + Math.cos(angle) * distance,
+      y: this.state.position.y + Math.sin(angle) * distance,
     };
     const target = {
       x: Math.max(0, Math.min(unclampedTarget.x, maxX)),
       y: Math.max(0, Math.min(unclampedTarget.y, maxY)),
     };
-    const targetDistance = magnitude(subtract(target, lainState.position));
 
     if (
-      targetDistance <= TARGET_RADIUS ||
-      targetDistance > WALK_RADIUS
+      magnitude(subtract(target, this.state.position)) <= TARGET_RADIUS
     ) {
-      return;
+      return false;
     }
 
-    this.startMovement(target);
+    const path: MovementPath =
+      this.nextRandom() < SUGAR_RUSH_SINE_CHANCE
+        ? "sine"
+        : "parabola";
+    return this.startMovement(target, MOVEMENT_TIMEOUT, path);
   }
 
-  private triggerExpression() {
-    const lainState = this.state;
-    const lainElements = this.lainElements;
+  private moveDuringSugarRush(viewport: Viewport, elapsed: number): void {
+    if (!this.movementCurve) {
+      this.startSugarRushMovement(viewport);
+    }
 
-    if (!lainElements || lainState.eventActive) return;
+    if (this.movementCurve) {
+      this.moveTowardTarget(elapsed);
+    }
 
-    const expressionUrl =
-      lainState.outfit === "bear" ? assets.misc.exp2 : assets.misc.exp1;
-
-    lainElements.expression.src = expressionUrl;
-    this.showTemporarily(lainElements.expression, 3000);
+    const maxX = Math.max(0, viewport.width - SPRITE_SIZE.normal);
+    const maxY = Math.max(0, viewport.height - SPRITE_SIZE.normal);
+    this.state.position.x = Math.max(0, Math.min(this.state.position.x, maxX));
+    this.state.position.y = Math.max(0, Math.min(this.state.position.y, maxY));
+    if (this.state.velocity.x < 0) this.facing = "left";
+    else if (this.state.velocity.x > 0) this.facing = "right";
   }
 
-  private triggerSpecialEvent(outfit: LainState["outfit"] = this.state.outfit) {
-    const lainState = this.state;
-    const lainElements = this.lainElements;
+  private tryToStartWalking(viewport: Viewport, elapsed: number): void {
+    if (this.idleRemaining > 0 || elapsed <= 0) return;
 
-    if (!lainElements || lainState.eventActive || lainState.sugarRush) return;
+    const probability =
+      1 -
+      Math.pow(
+        1 - AUTONOMOUS_WALK_CHANCE,
+        elapsed / FRAME_DURATION,
+      );
+    if (this.nextRandom() >= probability) return;
+
+    const angle = this.nextRandom() * Math.PI * 2;
+    const distance =
+      WALK_MIN_DISTANCE +
+      this.nextRandom() * (WALK_RADIUS - WALK_MIN_DISTANCE);
+    const maxX = Math.max(0, viewport.width - SPRITE_SIZE.normal);
+    const maxY = Math.max(0, viewport.height - SPRITE_SIZE.normal);
+    const unclampedTarget = {
+      x: this.state.position.x + Math.cos(angle) * distance,
+      y: this.state.position.y + Math.sin(angle) * distance,
+    };
+    const target = {
+      x: Math.max(0, Math.min(unclampedTarget.x, maxX)),
+      y: Math.max(0, Math.min(unclampedTarget.y, maxY)),
+    };
+    const targetDistance = magnitude(subtract(target, this.state.position));
+
+    if (targetDistance <= TARGET_RADIUS || targetDistance > WALK_RADIUS) return;
+    const pathRoll = this.nextRandom();
+    const path: MovementPath =
+      pathRoll < AUTONOMOUS_SINE_CHANCE
+        ? "sine"
+        : pathRoll <
+            AUTONOMOUS_SINE_CHANCE + AUTONOMOUS_PARABOLA_CHANCE
+          ? "parabola"
+          : "direct";
+
+    this.startMovement(target, MOVEMENT_TIMEOUT, path);
+  }
+
+  private triggerExpression(): void {
+    if (!this.running || this.state.eventActive) return;
+
+    this.expressionAsset =
+      this.state.outfit === "bear" ? assets.misc.exp2 : assets.misc.exp1;
+    this.expression = {
+      remaining: 3000,
+      invocation: this.expression.invocation + 1,
+    };
+  }
+
+  private triggerSpecialEvent(outfit: LainState["outfit"] = this.state.outfit): void {
+    if (!this.running || this.state.eventActive || this.state.sugarRush) return;
 
     const eventAsset = assets[outfit]?.event;
     if (!eventAsset) return;
 
-    const eventDurations: Partial<Record<LainState["outfit"], number>> = {
-      bear: 8000,
-      school: 3000,
-      pink: 10000,
+    this.event = {
+      remaining: EVENT_DURATIONS[outfit] ?? 10000,
+      invocation: this.event.invocation + 1,
     };
-
-    const duration = eventDurations[outfit] ?? 10000;
-    const invocation = ++this.eventInvocation;
-    this.cancelTimeout(this.eventTimeout);
-    lainState.eventActive = true;
-    lainElements.lainSprite.src = eventAsset;
-    this.draw();
-
-    const timeoutId = this.schedule(() => {
-      if (this.eventInvocation !== invocation) return;
-
-      this.eventTimeout = null;
-      lainState.eventActive = false;
-      this.finishMovement();
-      this.draw();
-    }, duration);
-    this.eventTimeout = timeoutId;
+    this.eventOutfit = outfit;
+    this.state.eventActive = true;
   }
 
-  private showTemporarily(lainElements: HTMLElement, duration: number) {
-    const invocation = ++this.expressionInvocation;
-    this.cancelTimeout(this.expressionTimeout);
-    lainElements.style.opacity = "1";
+  private triggerSugarRush(): void {
+    if (!this.running || this.state.eventActive) return;
 
-    const timeoutId = this.schedule(() => {
-      if (this.expressionInvocation !== invocation) return;
-
-      this.expressionTimeout = null;
-      lainElements.style.opacity = "0";
-    }, duration);
-    this.expressionTimeout = timeoutId;
-  }
-
-  private triggerSugarRush() {
-    const lainState = this.state;
-    if (lainState.eventActive) return;
-
-    const randomSign = () => (Math.random() > 0.5 ? 1 : -1);
-    const invocation = ++this.sugarRushInvocation;
-    this.cancelTimeout(this.sugarRushTimeout);
-    this.cancelMovementTimeout();
-    this.movementTarget = null;
-    this.movementTimedOut = false;
-    lainState.mode = "idle";
-    lainState.target = { ...lainState.position };
-    lainState.sugarRush = true;
-    lainState.velocity = scale(
+    this.sugarRushState = {
+      remaining: 5000,
+      invocation: this.sugarRushState.invocation + 1,
+    };
+    this.cancelMovement();
+    this.state.sugarRush = true;
+    this.state.velocity = scale(
       {
-        x: randomSign(),
-        y: randomSign(),
+        x: this.nextRandom() > 0.5 ? 1 : -1,
+        y: this.nextRandom() > 0.5 ? 1 : -1,
       },
       10,
     );
-
-    const timeoutId = this.schedule(() => {
-      if (this.sugarRushInvocation !== invocation) return;
-
-      this.sugarRushTimeout = null;
-      lainState.sugarRush = false;
-      this.finishMovement();
-    }, 5000);
-    this.sugarRushTimeout = timeoutId;
+    if (this.state.velocity.x < 0) this.facing = "left";
+    else if (this.state.velocity.x > 0) this.facing = "right";
   }
 
-  private showDialogue(text?: string) {
-    const lainElements = this.lainElements;
-    if (!lainElements) return;
+  private showDialogue(text?: string): void {
+    if (!this.running) return;
 
-    const message =
-      text ?? dialogues[Math.floor(Math.random() * dialogues.length)];
-    const invocation = ++this.dialogueInvocation;
-    this.cancelTimeout(this.dialogueTimeout);
-    lainElements.bubble.textContent = message;
-    lainElements.bubble.style.opacity = "1";
+    const message = text ?? dialogues[Math.floor(this.nextRandom() * dialogues.length)];
+    this.dialogueText = message ?? "";
+    this.dialogue = {
+      remaining: 4000,
+      invocation: this.dialogue.invocation + 1,
+    };
+  }
 
-    const timeoutId = this.schedule(() => {
-      if (this.dialogueInvocation !== invocation) return;
-
-      this.dialogueTimeout = null;
-      lainElements.bubble.style.opacity = "0";
-    }, 4000);
-    this.dialogueTimeout = timeoutId;
+  private nextRandom(): number {
+    const value = this.random();
+    if (!Number.isFinite(value)) return 0.5;
+    return Math.max(0, Math.min(0.999999999, value));
   }
 }
