@@ -1,13 +1,13 @@
 import definePlugin from "@utils/types";
 import { ApplicationCommandOptionType } from "@api/Commands";
+import { LainPetRuntime } from "./classes/LainPetRuntime";
 import { FlyingMisc } from "./classes/FlyingMisc";
-import { LainPet } from "./classes/LainPet";
 import { Navi } from "./classes/Navi";
 import { assets } from "./data/assets";
 import { magnitude, subtract } from "./types/Vector2";
 
-
-const lainPet = new LainPet();
+const runtime = new LainPetRuntime();
+const lainPet = runtime.getPet();
 const navi = new Navi(assets.misc.navi);
 const flyingMisc = new FlyingMisc({
   crow: assets.misc.crow,
@@ -22,6 +22,25 @@ type Outfit = (typeof OUTFITS)[number];
 
 function isOutfit(value: string): value is Outfit {
   return OUTFITS.includes(value as Outfit);
+}
+
+function forceDebugMovement(path: "sine" | "parabola") {
+  const position = lainPet.getPosition();
+  if (!position) return;
+
+  const spriteSize = 100;
+  const maxX = Math.max(0, window.innerWidth - spriteSize);
+  const maxY = Math.max(0, window.innerHeight - spriteSize);
+  const target = {
+    x: position.x < maxX / 2 ? maxX : 0,
+    y: Math.max(0, Math.min(position.y, maxY)),
+  };
+
+  if (path === "sine") {
+    lainPet.sineMoveTo(target);
+  } else {
+    lainPet.parabolicMoveTo(target);
+  }
 }
 function updateNaviInteraction() {
   if (!navi.isLanded()) return;
@@ -122,6 +141,8 @@ export default definePlugin({
             { name: "Spawn Girl", label: "Spawn Girl", value: "girl" },
             { name: "Express", label: "Express", value: "express" },
             { name: "Speak", label: "Speak", value: "speak" },
+            { name: "Debug Sine Movement", label: "Debug Sine Movement", value: "sine" },
+            { name: "Debug Parabolic Movement", label: "Debug Parabolic Movement", value: "parabola" },
           ],
         },
         {
@@ -161,6 +182,12 @@ export default definePlugin({
           case "dance":
             lainPet.forceDance();
             break;
+          case "sine":
+            forceDebugMovement("sine");
+            break;
+          case "parabola":
+            forceDebugMovement("parabola");
+            break;
           case "sugarrush":
             lainPet.sugarRush();
             break;
@@ -185,7 +212,7 @@ export default definePlugin({
   ],
 
   start() {
-    lainPet.start();
+    runtime.start();
     startAmbientBehavior();
     console.log(
       "%c Lain Pet by realmxrza | custom Lain-Discord build started ",
@@ -197,7 +224,7 @@ export default definePlugin({
     stopAmbientBehavior();
     navi.stop();
     flyingMisc.stop();
-    lainPet.stop();
+    runtime.stop();
     console.log(
       "%c Lain Pet by realmxrza | custom Lain-Discord build stopped ",
       "background: #000; color: #f0f; font-weight: bold; font-size: 14px;",
